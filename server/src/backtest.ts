@@ -241,7 +241,9 @@ function runSellPut(
   initialCapital: number,
   period: Period,
   riskFreeRate: number,
-  transactionCostPct: number
+  commissionPerContract: number,
+  spreadPct: number,
+  cashInterestRate: number
 ): { result: StrategyResult; trades: Trade[] } {
   const startIdx = findTradingDayOnOrAfter(prices, startDate);
   if (startIdx === -1) {
@@ -290,10 +292,23 @@ function runSellPut(
   let cashInCycle = 0; // cash after receiving premium
   let cyclePremiumPerShare = 0;
 
+  const dailyInterestRate = cashInterestRate > 0 ? Math.pow(1 + cashInterestRate, 1 / 252) - 1 : 0;
+
   for (let i = startIdx; i <= endIdx; i++) {
     const today = prices[i].date;
     const currentPrice = prices[i].close;
     const isRollDay = rollDateSet.has(today);
+
+    // Accrue daily interest on cash
+    if (dailyInterestRate > 0) {
+      if (inCycle) {
+        const interest = cashInCycle * dailyInterestRate;
+        cashInCycle += interest;
+      } else {
+        const interest = capital * dailyInterestRate;
+        capital += interest;
+      }
+    }
 
     // Settle existing cycle if we hit a roll day
     if (inCycle && isRollDay) {
@@ -347,12 +362,14 @@ function runSellPut(
 
       const daysToExpiry = (new Date(nextRollDate).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24);
       const T = daysToExpiry / 365;
-      const putPrice = bsPutPrice(currentPrice, riskFreeRate, sigma, T);
-      const netPremium = putPrice * (1 - transactionCostPct);
+      const putMidPrice = bsPutPrice(currentPrice, riskFreeRate, sigma, T);
+      const spreadCostPerShare = putMidPrice * spreadPct / 2;
+      const netPremiumPerShare = putMidPrice - spreadCostPerShare;
+      const openCommission = commissionPerContract * contracts;
 
       strike = currentPrice;
-      cyclePremiumPerShare = netPremium;
-      cashInCycle = capital + netPremium * 100 * contracts;
+      cyclePremiumPerShare = netPremiumPerShare;
+      cashInCycle = capital + netPremiumPerShare * 100 * contracts - openCommission;
       cycleSigma = sigma;
       cycleExpiryDate = nextRollDate;
       cycleSellDate = today;
@@ -431,7 +448,9 @@ export function runBacktest(
   initialCapital: number,
   period: Period,
   riskFreeRate: number,
-  transactionCostPct: number
+  commissionPerContract: number,
+  spreadPct: number,
+  cashInterestRate: number
 ): BacktestResponse {
   const buyAndHold = runBuyAndHold(prices, startDate, endDate, initialCapital, riskFreeRate);
   const { result: sellPut, trades } = runSellPut(
@@ -441,7 +460,9 @@ export function runBacktest(
     initialCapital,
     period,
     riskFreeRate,
-    transactionCostPct
+    commissionPerContract,
+    spreadPct,
+    cashInterestRate
   );
   return { buyAndHold, sellPut, trades };
 }
