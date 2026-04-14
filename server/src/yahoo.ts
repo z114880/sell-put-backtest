@@ -79,7 +79,7 @@ export async function fetchPrices(
   endDate: string
 ): Promise<PriceRecord[]> {
   const bufferStart = new Date(startDate);
-  bufferStart.setDate(bufferStart.getDate() - 30);
+  bufferStart.setDate(bufferStart.getDate() - 150);
 
   const period1 = toEpoch(bufferStart.toISOString().slice(0, 10));
   const period2 = toEpoch(endDate);
@@ -111,7 +111,7 @@ export async function fetchPrices(
   for (let i = 0; i < timestamps.length; i++) {
     const close = closes[i];
     if (close != null) {
-      const date = new Date(timestamps[i] * 1000).toISOString().slice(0, 10);
+      const date = new Date(timestamps[i] * 1000).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
       records.push({ date, close });
     }
   }

@@ -53,7 +53,7 @@ function findTradingDayOnOrBefore(prices: PriceRecord[], date: string): number {
 function getVolatilityPrices(prices: PriceRecord[], date: string): number[] {
   const refDate = new Date(date);
 
-  for (let lookback = 7; lookback <= 60; lookback += 7) {
+  for (let lookback = 45; lookback <= 120; lookback += 15) {
     const windowStart = new Date(refDate);
     windowStart.setDate(windowStart.getDate() - lookback);
     const windowStartStr = formatLocalDate(windowStart);
@@ -62,14 +62,14 @@ function getVolatilityPrices(prices: PriceRecord[], date: string): number[] {
       (p) => p.date >= windowStartStr && p.date < date
     );
 
-    if (window.length >= 2) {
+    if (window.length >= 20) {
       return window.map((p) => p.close);
     }
   }
 
-  // Return whatever we can find up to 60 days back (may be < 2)
+  // Return whatever we can find up to 120 days back
   const fallbackStart = new Date(refDate);
-  fallbackStart.setDate(fallbackStart.getDate() - 60);
+  fallbackStart.setDate(fallbackStart.getDate() - 120);
   const fallbackStartStr = formatLocalDate(fallbackStart);
   return prices
     .filter((p) => p.date >= fallbackStartStr && p.date < date)
@@ -202,8 +202,9 @@ function getRollFridays(startDate: string, endDate: string, period: Period): str
       // Find the last Friday of this month
       const lastDay = new Date(year, month + 1, 0); // last day of month
       const dayOfWeek = lastDay.getDay();
-      const offset = (dayOfWeek >= 5) ? dayOfWeek - 5 : dayOfWeek + 2;
-      const lastFriday = new Date(year, month + 1, 0 - offset);
+      const daysBack = (dayOfWeek + 2) % 7; // Fri=0, Sat=1, Sun=2, Mon=3, ...
+      const lastFriday = new Date(lastDay);
+      lastFriday.setDate(lastDay.getDate() - daysBack);
       const dateStr = formatLocalDate(lastFriday);
 
       if (dateStr >= startDate && dateStr <= endDate) {
@@ -281,11 +282,13 @@ function runSellPut(
 
   // Cycle state
   let inCycle = false;
-  let nextRollIdx = 0; // index into rollDates for the next expiry
   let strike = 0;
-  let premium = 0;
   let contracts = 0;
   let cycleSellDate = "";
+  let cycleSigma = 0;
+  let cycleExpiryDate = "";
+  let cashInCycle = 0; // cash after receiving premium
+  let cyclePremiumPerShare = 0;
 
   for (let i = startIdx; i <= endIdx; i++) {
     const today = prices[i].date;
@@ -294,19 +297,15 @@ function runSellPut(
 
     // Settle existing cycle if we hit a roll day
     if (inCycle && isRollDay) {
-      let pnl: number;
-      if (currentPrice >= strike) {
-        pnl = premium * 100 * contracts;
-      } else {
-        pnl = (premium - (strike - currentPrice)) * 100 * contracts;
-      }
-      capital += pnl;
+      const intrinsic = Math.max(strike - currentPrice, 0);
+      capital = cashInCycle - intrinsic * 100 * contracts;
+      const pnl = (cyclePremiumPerShare - intrinsic) * 100 * contracts;
 
       trades.push({
         sellDate: cycleSellDate,
         expiryDate: today,
         strike,
-        premium,
+        premium: cyclePremiumPerShare,
         expiryPrice: currentPrice,
         pnl,
         capitalAfter: capital,
@@ -351,40 +350,54 @@ function runSellPut(
       const netPremium = putPrice * (1 - transactionCostPct);
 
       strike = currentPrice;
-      premium = netPremium;
+      cyclePremiumPerShare = netPremium;
+      cashInCycle = capital + netPremium * 100 * contracts;
+      cycleSigma = sigma;
+      cycleExpiryDate = nextRollDate;
       cycleSellDate = today;
       inCycle = true;
 
-      equityCurve.push({ date: today, value: capital });
+      // Mark-to-market on sell day
+      const putMtm = bsPutPrice(currentPrice, riskFreeRate, cycleSigma, T, strike);
+      const equity = cashInCycle - putMtm * 100 * contracts;
+      equityCurve.push({ date: today, value: equity });
     } else if (!inCycle) {
       // Not a roll day and not in cycle — idle
       equityCurve.push({ date: today, value: capital });
     } else {
-      // In cycle, not yet roll day — capital unchanged
-      equityCurve.push({ date: today, value: capital });
+      // In cycle — mark to market the short put position
+      const daysRemaining = (new Date(cycleExpiryDate).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24);
+      const T_remaining = daysRemaining / 365;
+
+      let putMtm: number;
+      if (T_remaining <= 0) {
+        putMtm = Math.max(strike - currentPrice, 0);
+      } else {
+        putMtm = bsPutPrice(currentPrice, riskFreeRate, cycleSigma, T_remaining, strike);
+      }
+
+      const equity = cashInCycle - putMtm * 100 * contracts;
+      equityCurve.push({ date: today, value: equity });
     }
   }
 
   // Force-settle any open cycle at endDate
-  if (inCycle && equityCurve.length > 0) {
+  if (inCycle) {
     const lastPrice = prices[endIdx].close;
     const lastDate = prices[endIdx].date;
+    const intrinsic = Math.max(strike - lastPrice, 0);
+    capital = cashInCycle - intrinsic * 100 * contracts;
+    const pnl = (cyclePremiumPerShare - intrinsic) * 100 * contracts;
 
-    let pnl: number;
-    if (lastPrice >= strike) {
-      pnl = premium * 100 * contracts;
-    } else {
-      pnl = (premium - (strike - lastPrice)) * 100 * contracts;
+    if (equityCurve.length > 0) {
+      equityCurve[equityCurve.length - 1] = { date: lastDate, value: capital };
     }
-
-    capital += pnl;
-    equityCurve[equityCurve.length - 1] = { date: lastDate, value: capital };
 
     trades.push({
       sellDate: cycleSellDate,
       expiryDate: lastDate,
       strike,
-      premium,
+      premium: cyclePremiumPerShare,
       expiryPrice: lastPrice,
       pnl,
       capitalAfter: capital,

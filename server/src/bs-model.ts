@@ -35,12 +35,13 @@ export function bsPutPrice(
   spotPrice: number,
   riskFreeRate: number,
   sigma: number,
-  T: number
+  T: number,
+  strikePrice?: number
 ): number {
   if (sigma === 0 || T === 0) return 0;
 
   const S = spotPrice;
-  const K = spotPrice; // ATM: S = K
+  const K = strikePrice ?? spotPrice; // ATM if no strike given
   const r = riskFreeRate;
   const sqrtT = Math.sqrt(T);
 

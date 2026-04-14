@@ -164,7 +164,7 @@ export default function EquityChart({ buyAndHold, sellPut }: EquityChartProps) {
           />
           <Legend />
           <Line type="monotone" dataKey="bh" name="Buy & Hold" stroke="#2563eb" dot={false} strokeWidth={2} />
-          <Line type="stepAfter" dataKey="sp" name="Sell Put" stroke="#16a34a" dot={false} strokeWidth={2} />
+          <Line type="monotone" dataKey="sp" name="Sell Put" stroke="#16a34a" dot={false} strokeWidth={2} />
           {dragStart !== null && dragEnd !== null && dragStartDate && dragEndDate && (
             <ReferenceArea
               x1={dragStartDate}
