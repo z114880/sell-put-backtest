@@ -7,7 +7,10 @@ export interface BacktestRequest {
   initialCapital: number;
   period: Period;
   riskFreeRate: number;
-  transactionCostPct: number;
+  commissionPerContract: number;
+  spreadPct: number;
+  cashInterestEnabled: boolean;
+  cashInterestRate: number;
 }
 
 export interface EquityPoint {
@@ -20,7 +23,7 @@ export interface StrategyStats {
   annualizedReturn: number;
   maxDrawdown: number;
   sharpeRatio: number;
-  winRate?: number; // Sell Put only
+  winRate?: number;
 }
 
 export interface Trade {
@@ -44,10 +47,3 @@ export interface BacktestResponse {
   sellPut: StrategyResult;
   trades: Trade[];
 }
-
-export const PERIOD_DAYS: Record<Period, number> = {
-  weekly: 7,
-  biweekly: 14,
-  monthly: 30,
-  quarterly: 90,
-};
