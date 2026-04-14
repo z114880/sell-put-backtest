@@ -7,13 +7,13 @@ interface InputFormProps {
 }
 
 export default function InputForm({ onSubmit, loading }: InputFormProps) {
-  const [ticker, setTicker] = useState("SPY");
+  const [ticker, setTicker] = useState("QQQ");
   const [startDate, setStartDate] = useState("2023-01-01");
-  const [endDate, setEndDate] = useState("2024-01-01");
+  const [endDate, setEndDate] = useState("2026-04-13");
   const [initialCapital, setInitialCapital] = useState(100000);
   const [period, setPeriod] = useState<Period>("monthly");
   const [riskFreeRate, setRiskFreeRate] = useState(4.5);
-  const [transactionCostPct, setTransactionCostPct] = useState(5);
+  const [transactionCostPct, setTransactionCostPct] = useState(2);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,7 +30,7 @@ export default function InputForm({ onSubmit, loading }: InputFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6 mb-6">
-      <div className="overflow-x-auto -mx-1 px-1">
+      <div className="-mx-1 px-1">
         <div className="grid gap-4 items-end grid-cols-4">
    
           <div className="min-w-0">
@@ -102,7 +102,7 @@ export default function InputForm({ onSubmit, loading }: InputFormProps) {
               <span className="relative inline-block ml-1 group">
                 <span className="cursor-help text-gray-400 hover:text-gray-600">&#9432;</span>
                 <span className="invisible group-hover:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-56 bg-gray-800 text-white text-xs rounded px-3 py-2 z-10 leading-relaxed">
-                  占期权权利金的百分比，模拟买卖价差 (bid-ask spread) 和佣金等交易摩擦。例如 5% 表示卖出 Put 后实际收到 95% 的理论权利金。
+                  双边收取：开仓时从权利金中扣除，平仓/到期结算时在内在价值上追加。例如 2% 表示卖出 Put 收到 98% 的理论权利金，到期 ITM 结算时额外支付 2% 的内在价值作为交易成本。
                 </span>
               </span>
             </label>

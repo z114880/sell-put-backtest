@@ -298,8 +298,9 @@ function runSellPut(
     // Settle existing cycle if we hit a roll day
     if (inCycle && isRollDay) {
       const intrinsic = Math.max(strike - currentPrice, 0);
-      capital = cashInCycle - intrinsic * 100 * contracts;
-      const pnl = (cyclePremiumPerShare - intrinsic) * 100 * contracts;
+      const closeCost = intrinsic * transactionCostPct;
+      capital = cashInCycle - (intrinsic + closeCost) * 100 * contracts;
+      const pnl = (cyclePremiumPerShare - intrinsic - closeCost) * 100 * contracts;
 
       trades.push({
         sellDate: cycleSellDate,
@@ -386,8 +387,9 @@ function runSellPut(
     const lastPrice = prices[endIdx].close;
     const lastDate = prices[endIdx].date;
     const intrinsic = Math.max(strike - lastPrice, 0);
-    capital = cashInCycle - intrinsic * 100 * contracts;
-    const pnl = (cyclePremiumPerShare - intrinsic) * 100 * contracts;
+    const closeCost = intrinsic * transactionCostPct;
+    capital = cashInCycle - (intrinsic + closeCost) * 100 * contracts;
+    const pnl = (cyclePremiumPerShare - intrinsic - closeCost) * 100 * contracts;
 
     if (equityCurve.length > 0) {
       equityCurve[equityCurve.length - 1] = { date: lastDate, value: capital };
