@@ -312,10 +312,17 @@ function runSellPut(
 
     // Settle existing cycle if we hit a roll day
     if (inCycle && isRollDay) {
-      const intrinsic = Math.max(strike - currentPrice, 0);
-      const closeCost = intrinsic * transactionCostPct;
-      capital = cashInCycle - (intrinsic + closeCost) * 100 * contracts;
-      const pnl = (cyclePremiumPerShare - intrinsic - closeCost) * 100 * contracts;
+      const daysToExpiry = (new Date(cycleExpiryDate).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24);
+      const T_close = daysToExpiry / 365;
+      const putMidPrice = T_close > 0
+        ? bsPutPrice(currentPrice, riskFreeRate, cycleSigma, T_close, strike)
+        : Math.max(strike - currentPrice, 0);
+      const closeSpreadCost = putMidPrice * spreadPct / 2;
+      const closeCostPerShare = putMidPrice + closeSpreadCost;
+      const closeCommission = commissionPerContract * contracts;
+      const capitalBefore = cashInCycle - cyclePremiumPerShare * 100 * contracts;
+      capital = cashInCycle - closeCostPerShare * 100 * contracts - closeCommission;
+      const pnl = capital - capitalBefore;
 
       trades.push({
         sellDate: cycleSellDate,
@@ -403,10 +410,17 @@ function runSellPut(
   if (inCycle) {
     const lastPrice = prices[endIdx].close;
     const lastDate = prices[endIdx].date;
-    const intrinsic = Math.max(strike - lastPrice, 0);
-    const closeCost = intrinsic * transactionCostPct;
-    capital = cashInCycle - (intrinsic + closeCost) * 100 * contracts;
-    const pnl = (cyclePremiumPerShare - intrinsic - closeCost) * 100 * contracts;
+    const daysToExpiry = (new Date(cycleExpiryDate).getTime() - new Date(lastDate).getTime()) / (1000 * 60 * 60 * 24);
+    const T_close = daysToExpiry / 365;
+    const putMidPrice = T_close > 0
+      ? bsPutPrice(lastPrice, riskFreeRate, cycleSigma, T_close, strike)
+      : Math.max(strike - lastPrice, 0);
+    const closeSpreadCost = putMidPrice * spreadPct / 2;
+    const closeCostPerShare = putMidPrice + closeSpreadCost;
+    const closeCommission = commissionPerContract * contracts;
+    const capitalBefore = cashInCycle - cyclePremiumPerShare * 100 * contracts;
+    capital = cashInCycle - closeCostPerShare * 100 * contracts - closeCommission;
+    const pnl = capital - capitalBefore;
 
     if (equityCurve.length > 0) {
       equityCurve[equityCurve.length - 1] = { date: lastDate, value: capital };
