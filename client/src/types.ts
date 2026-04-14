@@ -7,7 +7,10 @@ export interface BacktestRequest {
   initialCapital: number;
   period: Period;
   riskFreeRate: number;
-  transactionCostPct: number;
+  commissionPerContract: number;
+  spreadPct: number;
+  cashInterestEnabled: boolean;
+  cashInterestRate: number;
 }
 
 export interface EquityPoint {
