@@ -9,7 +9,7 @@ const server = Fastify({ logger: true });
 await server.register(cors, { origin: true });
 
 server.post<{ Body: BacktestRequest }>("/api/backtest", async (request, reply) => {
-  const { ticker, startDate, endDate, initialCapital, period, riskFreeRate, transactionCostPct } = request.body;
+  const { ticker, startDate, endDate, initialCapital, period, riskFreeRate, commissionPerContract, spreadPct, cashInterestEnabled, cashInterestRate } = request.body;
 
   if (!ticker || !startDate || !endDate || !initialCapital || !period) {
     return reply.status(400).send({ error: "Missing required parameters" });
@@ -35,8 +35,10 @@ server.post<{ Body: BacktestRequest }>("/api/backtest", async (request, reply) =
     }
 
     const rfRate = riskFreeRate ?? 0.03;
-    const txCost = transactionCostPct ?? 0;
-    const result = runBacktest(prices, startDate, endDate, initialCapital, period, rfRate, txCost);
+    const commission = commissionPerContract ?? 0.65;
+    const spread = spreadPct ?? 0.03;
+    const cashRate = cashInterestEnabled ? (cashInterestRate ?? 0) : 0;
+    const result = runBacktest(prices, startDate, endDate, initialCapital, period, rfRate, commission, spread, cashRate);
     return result;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
