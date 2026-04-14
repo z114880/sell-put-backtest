@@ -6,6 +6,8 @@ export interface BacktestRequest {
   endDate: string;
   initialCapital: number;
   period: Period;
+  riskFreeRate: number;
+  transactionCostPct: number;
 }
 
 export interface EquityPoint {
@@ -30,7 +32,6 @@ export interface Trade {
   pnl: number;
   capitalAfter: number;
   contracts: number;
-  skipped: boolean;
 }
 
 export interface StrategyResult {

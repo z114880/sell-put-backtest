@@ -9,7 +9,7 @@ const server = Fastify({ logger: true });
 await server.register(cors, { origin: true });
 
 server.post<{ Body: BacktestRequest }>("/api/backtest", async (request, reply) => {
-  const { ticker, startDate, endDate, initialCapital, period } = request.body;
+  const { ticker, startDate, endDate, initialCapital, period, riskFreeRate, transactionCostPct } = request.body;
 
   if (!ticker || !startDate || !endDate || !initialCapital || !period) {
     return reply.status(400).send({ error: "Missing required parameters" });
@@ -34,7 +34,9 @@ server.post<{ Body: BacktestRequest }>("/api/backtest", async (request, reply) =
       return reply.status(400).send({ error: `No price data found for ${ticker} in the given date range` });
     }
 
-    const result = runBacktest(prices, startDate, endDate, initialCapital, period);
+    const rfRate = riskFreeRate ?? 0.03;
+    const txCost = transactionCostPct ?? 0;
+    const result = runBacktest(prices, startDate, endDate, initialCapital, period, rfRate, txCost);
     return result;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";

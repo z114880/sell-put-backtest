@@ -23,6 +23,7 @@ function toEpoch(dateStr: string): number {
 }
 
 function httpsGet(url: string, agent?: https.Agent): Promise<string> {
+  console.log(url, 'url')
   return new Promise((resolve, reject) => {
     const req = https.get(
       url,
@@ -84,7 +85,6 @@ export async function fetchPrices(
   const period2 = toEpoch(endDate);
 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${period1}&period2=${period2}&interval=1d&events=history`;
-
   const agent = getAgent();
   const body = await httpsGet(url, agent);
 

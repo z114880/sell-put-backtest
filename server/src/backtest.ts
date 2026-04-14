@@ -7,10 +7,22 @@ import type {
   Trade,
   BacktestResponse,
 } from "./types.js";
-import { PERIOD_DAYS } from "./types.js";
+
 import type { PriceRecord } from "./yahoo.js";
 
-const RISK_FREE_RATE = 0.03;
+// riskFreeRate is now passed as a parameter
+
+// ---------------------------------------------------------------------------
+// Helper: format a Date as YYYY-MM-DD using its local-time components.
+// Avoids the timezone-shift bug where toISOString() (UTC) disagrees with
+// a Date that was constructed in local time.
+// ---------------------------------------------------------------------------
+function formatLocalDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 // ---------------------------------------------------------------------------
 // Helper: find first trading day index >= date string
@@ -44,7 +56,7 @@ function getVolatilityPrices(prices: PriceRecord[], date: string): number[] {
   for (let lookback = 7; lookback <= 60; lookback += 7) {
     const windowStart = new Date(refDate);
     windowStart.setDate(windowStart.getDate() - lookback);
-    const windowStartStr = windowStart.toISOString().slice(0, 10);
+    const windowStartStr = formatLocalDate(windowStart);
 
     const window = prices.filter(
       (p) => p.date >= windowStartStr && p.date < date
@@ -58,7 +70,7 @@ function getVolatilityPrices(prices: PriceRecord[], date: string): number[] {
   // Return whatever we can find up to 60 days back (may be < 2)
   const fallbackStart = new Date(refDate);
   fallbackStart.setDate(fallbackStart.getDate() - 60);
-  const fallbackStartStr = fallbackStart.toISOString().slice(0, 10);
+  const fallbackStartStr = formatLocalDate(fallbackStart);
   return prices
     .filter((p) => p.date >= fallbackStartStr && p.date < date)
     .map((p) => p.close);
@@ -70,7 +82,8 @@ function getVolatilityPrices(prices: PriceRecord[], date: string): number[] {
 function computeStats(
   equityCurve: EquityPoint[],
   initialCapital: number,
-  totalDays: number
+  totalDays: number,
+  riskFreeRate: number
 ): StrategyStats {
   const finalValue =
     equityCurve.length > 0
@@ -108,7 +121,7 @@ function computeStats(
       dailyReturns.length;
     const dailyVol = Math.sqrt(variance);
     const annualizedVol = dailyVol * Math.sqrt(252);
-    const dailyRiskFree = RISK_FREE_RATE / 252;
+    const dailyRiskFree = riskFreeRate / 252;
     const excessReturn = meanReturn - dailyRiskFree;
     sharpeRatio =
       annualizedVol !== 0 ? (excessReturn * Math.sqrt(252)) / annualizedVol : 0;
@@ -124,7 +137,8 @@ function runBuyAndHold(
   prices: PriceRecord[],
   startDate: string,
   endDate: string,
-  initialCapital: number
+  initialCapital: number,
+  riskFreeRate: number
 ): StrategyResult {
   const startIdx = findTradingDayOnOrAfter(prices, startDate);
   if (startIdx === -1) {
@@ -154,23 +168,80 @@ function runBuyAndHold(
     (endDateActual.getTime() - startDateActual.getTime()) /
     (1000 * 60 * 60 * 24);
 
-  const stats = computeStats(equityCurve, initialCapital, totalDays);
+  const stats = computeStats(equityCurve, initialCapital, totalDays, riskFreeRate);
 
   return { equityCurve, stats };
 }
 
 // ---------------------------------------------------------------------------
-// Strategy 2: Sell Put (cash-secured, ATM, rolling)
+// Helper: compute all roll Fridays for the given period within [start, end]
+// - weekly:    every Friday
+// - biweekly:  every other Friday (starting from the first one)
+// - monthly:   last Friday of each month
+// - quarterly: last Friday of the last month of each quarter (Mar, Jun, Sep, Dec)
+// ---------------------------------------------------------------------------
+function getRollFridays(startDate: string, endDate: string, period: Period): string[] {
+  const start = new Date(startDate + "T00:00:00");
+  const end = new Date(endDate + "T00:00:00");
+  const fridays: string[] = [];
+
+  if (period === "monthly" || period === "quarterly") {
+    // Collect last Friday of relevant months
+    const quarterMonths = new Set([2, 5, 8, 11]); // Mar, Jun, Sep, Dec (0-indexed)
+    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+
+    while (cursor <= end) {
+      const year = cursor.getFullYear();
+      const month = cursor.getMonth();
+
+      if (period === "quarterly" && !quarterMonths.has(month)) {
+        cursor.setMonth(cursor.getMonth() + 1);
+        continue;
+      }
+
+      // Find the last Friday of this month
+      const lastDay = new Date(year, month + 1, 0); // last day of month
+      const dayOfWeek = lastDay.getDay();
+      const offset = (dayOfWeek >= 5) ? dayOfWeek - 5 : dayOfWeek + 2;
+      const lastFriday = new Date(year, month + 1, 0 - offset);
+      const dateStr = formatLocalDate(lastFriday);
+
+      if (dateStr >= startDate && dateStr <= endDate) {
+        fridays.push(dateStr);
+      }
+
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+  } else {
+    // weekly / biweekly: enumerate all Fridays
+    const cursor = new Date(start);
+    // Advance to first Friday on or after start
+    const dayOfWeek = cursor.getDay();
+    const daysToFri = (5 - dayOfWeek + 7) % 7;
+    cursor.setDate(cursor.getDate() + daysToFri);
+
+    const step = period === "biweekly" ? 14 : 7;
+    while (cursor <= end) {
+      fridays.push(formatLocalDate(cursor));
+      cursor.setDate(cursor.getDate() + step);
+    }
+  }
+
+  return fridays;
+}
+
+// ---------------------------------------------------------------------------
+// Strategy 2: Sell Put (cash-secured, ATM, rolling on Fridays)
 // ---------------------------------------------------------------------------
 function runSellPut(
   prices: PriceRecord[],
   startDate: string,
   endDate: string,
   initialCapital: number,
-  period: Period
+  period: Period,
+  riskFreeRate: number,
+  transactionCostPct: number
 ): { result: StrategyResult; trades: Trade[] } {
-  const periodDays = PERIOD_DAYS[period];
-
   const startIdx = findTradingDayOnOrAfter(prices, startDate);
   if (startIdx === -1) {
     throw new Error("No trading data found on or after startDate");
@@ -180,99 +251,117 @@ function runSellPut(
     throw new Error("No trading data found in the given date range");
   }
 
+  // Pre-compute all target roll Fridays
+  const rollFridays = getRollFridays(startDate, endDate, period);
+  const rollFridaySet = new Set(rollFridays);
+
+  // Build a set of all trading dates for quick lookup
+  const tradingDates = new Set(prices.slice(startIdx, endIdx + 1).map((p) => p.date));
+
+  // For each roll Friday, find the actual trading day (Friday itself, or the
+  // trading day just before if Friday is a holiday)
+  const rollDates: string[] = [];
+  for (const fri of rollFridays) {
+    if (tradingDates.has(fri)) {
+      rollDates.push(fri);
+    } else {
+      // Friday is not a trading day — use the closest trading day before it
+      const idx = findTradingDayOnOrBefore(prices, fri);
+      if (idx >= startIdx && idx <= endIdx) {
+        rollDates.push(prices[idx].date);
+      }
+    }
+  }
+
+  const rollDateSet = new Set(rollDates);
+
   let capital = initialCapital;
   const equityCurve: EquityPoint[] = [];
   const trades: Trade[] = [];
 
   // Cycle state
   let inCycle = false;
-  let expiryDate = "";
+  let nextRollIdx = 0; // index into rollDates for the next expiry
   let strike = 0;
-  let premium = 0; // per share
+  let premium = 0;
   let contracts = 0;
   let cycleSellDate = "";
 
   for (let i = startIdx; i <= endIdx; i++) {
     const today = prices[i].date;
     const currentPrice = prices[i].close;
+    const isRollDay = rollDateSet.has(today);
 
-    if (!inCycle) {
-      // Try to start a new cycle
+    // Settle existing cycle if we hit a roll day
+    if (inCycle && isRollDay) {
+      let pnl: number;
+      if (currentPrice >= strike) {
+        pnl = premium * 100 * contracts;
+      } else {
+        pnl = (premium - (strike - currentPrice)) * 100 * contracts;
+      }
+      capital += pnl;
+
+      trades.push({
+        sellDate: cycleSellDate,
+        expiryDate: today,
+        strike,
+        premium,
+        expiryPrice: currentPrice,
+        pnl,
+        capitalAfter: capital,
+        contracts,
+      });
+
+      inCycle = false;
+    }
+
+    // Open new cycle on a roll day (after settling the previous one)
+    if (!inCycle && isRollDay) {
       contracts = Math.floor(capital / (currentPrice * 100));
 
       if (contracts === 0) {
-        // Not enough capital — stay idle
         equityCurve.push({ date: today, value: capital });
         continue;
       }
 
-      // Calculate volatility
       const volPrices = getVolatilityPrices(prices, today);
       const sigma = historicalVolatility(volPrices);
 
       if (sigma === 0) {
-        // Can't price — skip this day, mark as skipped trade
-        trades.push({
-          sellDate: today,
-          expiryDate: today,
-          strike: currentPrice,
-          premium: 0,
-          expiryPrice: currentPrice,
-          pnl: 0,
-          capitalAfter: capital,
-          contracts,
-          skipped: true,
-        });
         equityCurve.push({ date: today, value: capital });
         continue;
       }
 
-      const T = periodDays / 365;
-      const putPrice = bsPutPrice(currentPrice, RISK_FREE_RATE, sigma, T);
+      // Find the next roll date to determine T (time to expiry)
+      const currentRollPos = rollDates.indexOf(today);
+      const nextRollDate = currentRollPos < rollDates.length - 1
+        ? rollDates[currentRollPos + 1]
+        : null;
 
-      // Set expiry date (natural calendar days forward)
-      const expiry = new Date(today);
-      expiry.setDate(expiry.getDate() + periodDays);
-      expiryDate = expiry.toISOString().slice(0, 10);
+      if (!nextRollDate) {
+        // No future roll date — don't open a new position
+        equityCurve.push({ date: today, value: capital });
+        continue;
+      }
+
+      const daysToExpiry = (new Date(nextRollDate).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24);
+      const T = daysToExpiry / 365;
+      const putPrice = bsPutPrice(currentPrice, riskFreeRate, sigma, T);
+      const netPremium = putPrice * (1 - transactionCostPct);
 
       strike = currentPrice;
-      premium = putPrice;
+      premium = netPremium;
       cycleSellDate = today;
       inCycle = true;
 
       equityCurve.push({ date: today, value: capital });
+    } else if (!inCycle) {
+      // Not a roll day and not in cycle — idle
+      equityCurve.push({ date: today, value: capital });
     } else {
-      // In a cycle — equity is the current cash (unchanged until settlement)
-      if (today >= expiryDate) {
-        // Settle the cycle
-        let pnl: number;
-        if (currentPrice >= strike) {
-          // OTM — keep full premium
-          pnl = premium * 100 * contracts;
-        } else {
-          // ITM — premium minus assignment loss
-          pnl = (premium - (strike - currentPrice)) * 100 * contracts;
-        }
-
-        capital += pnl;
-
-        trades.push({
-          sellDate: cycleSellDate,
-          expiryDate: today,
-          strike,
-          premium,
-          expiryPrice: currentPrice,
-          pnl,
-          capitalAfter: capital,
-          contracts,
-          skipped: false,
-        });
-
-        equityCurve.push({ date: today, value: capital });
-        inCycle = false;
-      } else {
-        equityCurve.push({ date: today, value: capital });
-      }
+      // In cycle, not yet roll day — capital unchanged
+      equityCurve.push({ date: today, value: capital });
     }
   }
 
@@ -289,8 +378,6 @@ function runSellPut(
     }
 
     capital += pnl;
-
-    // Update the last equity point with settled value
     equityCurve[equityCurve.length - 1] = { date: lastDate, value: capital };
 
     trades.push({
@@ -302,7 +389,6 @@ function runSellPut(
       pnl,
       capitalAfter: capital,
       contracts,
-      skipped: false,
     });
   }
 
@@ -312,12 +398,10 @@ function runSellPut(
     (endDateActual.getTime() - startDateActual.getTime()) /
     (1000 * 60 * 60 * 24);
 
-  const stats = computeStats(equityCurve, initialCapital, totalDays);
+  const stats = computeStats(equityCurve, initialCapital, totalDays, riskFreeRate);
 
-  // Win rate: non-skipped trades where pnl > 0
-  const realTrades = trades.filter((t) => !t.skipped);
-  const wins = realTrades.filter((t) => t.pnl > 0).length;
-  stats.winRate = realTrades.length > 0 ? wins / realTrades.length : 0;
+  const wins = trades.filter((t) => t.pnl > 0).length;
+  stats.winRate = trades.length > 0 ? wins / trades.length : 0;
 
   return { result: { equityCurve, stats }, trades };
 }
@@ -330,15 +414,19 @@ export function runBacktest(
   startDate: string,
   endDate: string,
   initialCapital: number,
-  period: Period
+  period: Period,
+  riskFreeRate: number,
+  transactionCostPct: number
 ): BacktestResponse {
-  const buyAndHold = runBuyAndHold(prices, startDate, endDate, initialCapital);
+  const buyAndHold = runBuyAndHold(prices, startDate, endDate, initialCapital, riskFreeRate);
   const { result: sellPut, trades } = runSellPut(
     prices,
     startDate,
     endDate,
     initialCapital,
-    period
+    period,
+    riskFreeRate,
+    transactionCostPct
   );
   return { buyAndHold, sellPut, trades };
 }

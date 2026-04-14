@@ -37,9 +37,7 @@ export default function TradeTable({ trades }: TradeTableProps) {
                 </td>
                 <td className="px-4 py-3 text-right">${trade.capitalAfter.toFixed(2)}</td>
                 <td className="px-4 py-3">
-                  {trade.skipped ? (
-                    <span className="text-yellow-600">Skipped</span>
-                  ) : trade.pnl >= 0 ? (
+                  {trade.pnl >= 0 ? (
                     <span className="text-green-600">Win</span>
                   ) : (
                     <span className="text-red-600">Loss</span>
