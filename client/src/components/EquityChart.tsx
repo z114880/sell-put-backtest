@@ -16,11 +16,11 @@ interface ChartRow {
   sp?: number;
 }
 
-// Custom X-axis tick: Fridays rendered in red
+// Custom X-axis tick: Thursdays rendered in red
 function CustomXTick({ x, y, payload }: { x: number; y: number; payload: { value: string } }) {
   const dateStr = payload.value;
-  const day = new Date(dateStr + "T00:00:00").getDay(); // 5 = Friday
-  const isFriday = day === 5;
+  const day = new Date(dateStr + "T00:00:00").getDay(); // 4 = Thursday
+  const isThursday = day === 4;
   const label = dateStr.slice(5); // MM-DD
 
   return (
@@ -29,8 +29,8 @@ function CustomXTick({ x, y, payload }: { x: number; y: number; payload: { value
       y={y + 12}
       textAnchor="middle"
       fontSize={12}
-      fill={isFriday ? "#dc2626" : "#666"}
-      fontWeight={isFriday ? 600 : 400}
+      fill={isThursday ? "#dc2626" : "#666"}
+      fontWeight={isThursday ? 600 : 400}
     >
       {label}
     </text>
@@ -124,8 +124,8 @@ export default function EquityChart({ buyAndHold, sellPut }: EquityChartProps) {
         <h2 className="text-lg font-semibold">Equity Curve</h2>
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1 text-xs text-gray-500">
-            <span className="font-semibold text-red-600">Fri</span>
-            = Friday
+            <span className="font-semibold text-red-600">Thu</span>
+            = Thursday
           </span>
           <span className="text-xs text-gray-400">Drag to zoom</span>
           {isZoomed && (

@@ -38,10 +38,11 @@ export function bsPutPrice(
   T: number,
   strikePrice?: number
 ): number {
-  if (sigma === 0 || T === 0) return 0;
+  const K = strikePrice ?? spotPrice; // ATM if no strike given
+  if (T <= 0) return Math.max(K - spotPrice, 0);
+  if (sigma === 0) return Math.max(K * Math.exp(-riskFreeRate * T) - spotPrice, 0);
 
   const S = spotPrice;
-  const K = strikePrice ?? spotPrice; // ATM if no strike given
   const r = riskFreeRate;
   const sqrtT = Math.sqrt(T);
 
@@ -49,4 +50,48 @@ export function bsPutPrice(
   const d2 = d1 - sigma * sqrtT;
 
   return K * Math.exp(-r * T) * normalCDF(-d2) - S * normalCDF(-d1);
+}
+
+// Put delta = N(d1) - 1  (always negative for puts)
+export function bsPutDelta(
+  spotPrice: number,
+  strikePrice: number,
+  riskFreeRate: number,
+  sigma: number,
+  T: number
+): number {
+  if (sigma === 0 || T <= 0) return strikePrice >= spotPrice ? -1 : 0;
+  const d1 =
+    (Math.log(spotPrice / strikePrice) +
+      (riskFreeRate + 0.5 * sigma * sigma) * T) /
+    (sigma * Math.sqrt(T));
+  return normalCDF(d1) - 1;
+}
+
+// Find the strike that produces a target put delta (given as negative, e.g. -0.30).
+// Uses bisection over [0.5*S, 1.5*S].
+export function findStrikeForDelta(
+  spotPrice: number,
+  riskFreeRate: number,
+  sigma: number,
+  T: number,
+  targetDelta: number // negative, e.g. -0.30
+): number {
+  // Put delta is monotonically decreasing as K increases (more ITM → delta → -1)
+  // Low K → delta near 0; High K → delta near -1
+  let lo = spotPrice * 0.5;
+  let hi = spotPrice * 1.5;
+
+  for (let iter = 0; iter < 100; iter++) {
+    const mid = (lo + hi) / 2;
+    const delta = bsPutDelta(spotPrice, mid, riskFreeRate, sigma, T);
+    if (Math.abs(delta - targetDelta) < 1e-6) return mid;
+    if (delta > targetDelta) {
+      // delta is less negative than target → need higher strike
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return (lo + hi) / 2;
 }

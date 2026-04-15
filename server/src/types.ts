@@ -7,6 +7,9 @@ export interface BacktestRequest {
   initialCapital: number;
   period: Period;
   riskFreeRate: number;
+  delta: number; // target put delta as positive number, e.g. 0.50 = ATM, 0.30 = OTM
+  ivPremium: number; // IV premium over HV, e.g. 0.20 = +20%
+  volWindow: number; // number of trading days for HV calculation
   commissionPerContract: number;
   spreadPct: number;
   cashInterestEnabled: boolean;

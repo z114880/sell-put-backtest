@@ -1,4 +1,4 @@
-import { historicalVolatility, bsPutPrice } from "./bs-model.js";
+import { historicalVolatility, bsPutPrice, findStrikeForDelta } from "./bs-model.js";
 import type {
   Period,
   EquityPoint,
@@ -47,33 +47,19 @@ function findTradingDayOnOrBefore(prices: PriceRecord[], date: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: get closing prices from the 7 natural days before `date`.
-// Expands backward in 7-day increments (up to 60 days) if < 2 trading days.
+// Helper: get the last `volWindow` trading-day closing prices before `date`.
 // ---------------------------------------------------------------------------
-function getVolatilityPrices(prices: PriceRecord[], date: string): number[] {
-  const refDate = new Date(date);
-
-  for (let lookback = 45; lookback <= 120; lookback += 15) {
-    const windowStart = new Date(refDate);
-    windowStart.setDate(windowStart.getDate() - lookback);
-    const windowStartStr = formatLocalDate(windowStart);
-
-    const window = prices.filter(
-      (p) => p.date >= windowStartStr && p.date < date
-    );
-
-    if (window.length >= 20) {
-      return window.map((p) => p.close);
-    }
+function getVolatilityPrices(prices: PriceRecord[], date: string, volWindow: number): number[] {
+  // Find the index of the last trading day before `date`
+  let endIdx = -1;
+  for (let i = 0; i < prices.length; i++) {
+    if (prices[i].date < date) endIdx = i;
+    else break;
   }
+  if (endIdx < 0) return [];
 
-  // Return whatever we can find up to 120 days back
-  const fallbackStart = new Date(refDate);
-  fallbackStart.setDate(fallbackStart.getDate() - 120);
-  const fallbackStartStr = formatLocalDate(fallbackStart);
-  return prices
-    .filter((p) => p.date >= fallbackStartStr && p.date < date)
-    .map((p) => p.close);
+  const startIdx = Math.max(0, endIdx - volWindow + 1);
+  return prices.slice(startIdx, endIdx + 1).map((p) => p.close);
 }
 
 // ---------------------------------------------------------------------------
@@ -174,19 +160,19 @@ function runBuyAndHold(
 }
 
 // ---------------------------------------------------------------------------
-// Helper: compute all roll Fridays for the given period within [start, end]
-// - weekly:    every Friday
-// - biweekly:  every other Friday (starting from the first one)
-// - monthly:   last Friday of each month
-// - quarterly: last Friday of the last month of each quarter (Mar, Jun, Sep, Dec)
+// Helper: compute all roll Thursdays for the given period within [start, end]
+// - weekly:    every Thursday
+// - biweekly:  every other Thursday (starting from the first one)
+// - monthly:   last Thursday of each month
+// - quarterly: last Thursday of the last month of each quarter (Mar, Jun, Sep, Dec)
 // ---------------------------------------------------------------------------
-function getRollFridays(startDate: string, endDate: string, period: Period): string[] {
+function getRollThursdays(startDate: string, endDate: string, period: Period): string[] {
   const start = new Date(startDate + "T00:00:00");
   const end = new Date(endDate + "T00:00:00");
-  const fridays: string[] = [];
+  const thursdays: string[] = [];
 
   if (period === "monthly" || period === "quarterly") {
-    // Collect last Friday of relevant months
+    // Collect last Thursday of relevant months
     const quarterMonths = new Set([2, 5, 8, 11]); // Mar, Jun, Sep, Dec (0-indexed)
     const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
 
@@ -199,40 +185,40 @@ function getRollFridays(startDate: string, endDate: string, period: Period): str
         continue;
       }
 
-      // Find the last Friday of this month
+      // Find the last Thursday of this month
       const lastDay = new Date(year, month + 1, 0); // last day of month
       const dayOfWeek = lastDay.getDay();
-      const daysBack = (dayOfWeek + 2) % 7; // Fri=0, Sat=1, Sun=2, Mon=3, ...
-      const lastFriday = new Date(lastDay);
-      lastFriday.setDate(lastDay.getDate() - daysBack);
-      const dateStr = formatLocalDate(lastFriday);
+      const daysBack = (dayOfWeek + 3) % 7; // Thu=0, Fri=1, Sat=2, Sun=3, ...
+      const lastThursday = new Date(lastDay);
+      lastThursday.setDate(lastDay.getDate() - daysBack);
+      const dateStr = formatLocalDate(lastThursday);
 
       if (dateStr >= startDate && dateStr <= endDate) {
-        fridays.push(dateStr);
+        thursdays.push(dateStr);
       }
 
       cursor.setMonth(cursor.getMonth() + 1);
     }
   } else {
-    // weekly / biweekly: enumerate all Fridays
+    // weekly / biweekly: enumerate all Thursdays
     const cursor = new Date(start);
-    // Advance to first Friday on or after start
+    // Advance to first Thursday on or after start
     const dayOfWeek = cursor.getDay();
-    const daysToFri = (5 - dayOfWeek + 7) % 7;
-    cursor.setDate(cursor.getDate() + daysToFri);
+    const daysToThu = (4 - dayOfWeek + 7) % 7;
+    cursor.setDate(cursor.getDate() + daysToThu);
 
     const step = period === "biweekly" ? 14 : 7;
     while (cursor <= end) {
-      fridays.push(formatLocalDate(cursor));
+      thursdays.push(formatLocalDate(cursor));
       cursor.setDate(cursor.getDate() + step);
     }
   }
 
-  return fridays;
+  return thursdays;
 }
 
 // ---------------------------------------------------------------------------
-// Strategy 2: Sell Put (cash-secured, ATM, rolling on Fridays)
+// Strategy 2: Sell Put (cash-secured, delta-selected, rolling on Thursdays)
 // ---------------------------------------------------------------------------
 function runSellPut(
   prices: PriceRecord[],
@@ -241,6 +227,9 @@ function runSellPut(
   initialCapital: number,
   period: Period,
   riskFreeRate: number,
+  delta: number,
+  ivPremium: number,
+  volWindow: number,
   commissionPerContract: number,
   spreadPct: number,
   cashInterestRate: number
@@ -254,22 +243,21 @@ function runSellPut(
     throw new Error("No trading data found in the given date range");
   }
 
-  // Pre-compute all target roll Fridays
-  const rollFridays = getRollFridays(startDate, endDate, period);
-  const rollFridaySet = new Set(rollFridays);
+  // Pre-compute all target roll Thursdays
+  const rollThursdays = getRollThursdays(startDate, endDate, period);
 
   // Build a set of all trading dates for quick lookup
   const tradingDates = new Set(prices.slice(startIdx, endIdx + 1).map((p) => p.date));
 
-  // For each roll Friday, find the actual trading day (Friday itself, or the
-  // trading day just before if Friday is a holiday)
+  // For each roll Thursday, find the actual trading day (Thursday itself, or the
+  // trading day just before if Thursday is a holiday)
   const rollDates: string[] = [];
-  for (const fri of rollFridays) {
-    if (tradingDates.has(fri)) {
-      rollDates.push(fri);
+  for (const thu of rollThursdays) {
+    if (tradingDates.has(thu)) {
+      rollDates.push(thu);
     } else {
-      // Friday is not a trading day — use the closest trading day before it
-      const idx = findTradingDayOnOrBefore(prices, fri);
+      // Thursday is not a trading day — use the closest trading day before it
+      const idx = findTradingDayOnOrBefore(prices, thu);
       if (idx >= startIdx && idx <= endIdx) {
         rollDates.push(prices[idx].date);
       }
@@ -340,20 +328,16 @@ function runSellPut(
 
     // Open new cycle on a roll day (after settling the previous one)
     if (!inCycle && isRollDay) {
-      contracts = Math.floor(capital / (currentPrice * 100));
+      const volPrices = getVolatilityPrices(prices, today, volWindow);
+      const hv = historicalVolatility(volPrices);
 
-      if (contracts === 0) {
+      if (hv === 0) {
         equityCurve.push({ date: today, value: capital });
         continue;
       }
 
-      const volPrices = getVolatilityPrices(prices, today);
-      const sigma = historicalVolatility(volPrices);
-
-      if (sigma === 0) {
-        equityCurve.push({ date: today, value: capital });
-        continue;
-      }
+      // Apply IV premium: implied vol = historical vol * (1 + ivPremium)
+      const sigma = hv * (1 + ivPremium);
 
       // Find the next roll date to determine T (time to expiry)
       const currentRollPos = rollDates.indexOf(today);
@@ -362,19 +346,31 @@ function runSellPut(
         : null;
 
       if (!nextRollDate) {
-        // No future roll date — don't open a new position
         equityCurve.push({ date: today, value: capital });
         continue;
       }
 
       const daysToExpiry = (new Date(nextRollDate).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24);
       const T = daysToExpiry / 365;
-      const putMidPrice = bsPutPrice(currentPrice, riskFreeRate, sigma, T);
+
+      // Find strike for target delta using IV-adjusted sigma, then round
+      const targetDelta = -delta;
+      strike = findStrikeForDelta(currentPrice, riskFreeRate, sigma, T, targetDelta);
+      strike = Math.round(strike);
+
+      // Compute contracts using strike (cash-secured margin = strike * 100)
+      contracts = Math.floor(capital / (strike * 100));
+
+      if (contracts === 0) {
+        equityCurve.push({ date: today, value: capital });
+        continue;
+      }
+
+      // Price the put at the rounded strike
+      const putMidPrice = bsPutPrice(currentPrice, riskFreeRate, sigma, T, strike);
       const spreadCostPerShare = putMidPrice * spreadPct / 2;
       const netPremiumPerShare = putMidPrice - spreadCostPerShare;
       const openCommission = commissionPerContract * contracts;
-
-      strike = currentPrice;
       cyclePremiumPerShare = netPremiumPerShare;
       cashInCycle = capital + netPremiumPerShare * 100 * contracts - openCommission;
       cycleSigma = sigma;
@@ -382,10 +378,9 @@ function runSellPut(
       cycleSellDate = today;
       inCycle = true;
 
-      // Mark-to-market on sell day
-      const putMtm = bsPutPrice(currentPrice, riskFreeRate, cycleSigma, T, strike);
-      const equity = cashInCycle - putMtm * 100 * contracts;
-      equityCurve.push({ date: today, value: equity });
+      // Opening-day equity: capital minus transaction costs (spread + commission)
+      const openingEquity = capital - spreadCostPerShare * 100 * contracts - openCommission;
+      equityCurve.push({ date: today, value: openingEquity });
     } else if (!inCycle) {
       // Not a roll day and not in cycle — idle
       equityCurve.push({ date: today, value: capital });
@@ -462,6 +457,9 @@ export function runBacktest(
   initialCapital: number,
   period: Period,
   riskFreeRate: number,
+  delta: number,
+  ivPremium: number,
+  volWindow: number,
   commissionPerContract: number,
   spreadPct: number,
   cashInterestRate: number
@@ -474,6 +472,9 @@ export function runBacktest(
     initialCapital,
     period,
     riskFreeRate,
+    delta,
+    ivPremium,
+    volWindow,
     commissionPerContract,
     spreadPct,
     cashInterestRate

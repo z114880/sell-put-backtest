@@ -7,6 +7,9 @@ export interface BacktestRequest {
   initialCapital: number;
   period: Period;
   riskFreeRate: number;
+  delta: number;
+  ivPremium: number;
+  volWindow: number;
   commissionPerContract: number;
   spreadPct: number;
   cashInterestEnabled: boolean;

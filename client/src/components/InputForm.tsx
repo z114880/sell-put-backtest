@@ -13,6 +13,9 @@ export default function InputForm({ onSubmit, loading }: InputFormProps) {
   const [initialCapital, setInitialCapital] = useState("100000");
   const [period, setPeriod] = useState<Period>("monthly");
   const [riskFreeRate, setRiskFreeRate] = useState("4.5");
+  const [delta, setDelta] = useState("50");
+  const [ivPremium, setIvPremium] = useState("20");
+  const [volWindow, setVolWindow] = useState("30");
   const [commissionPerContract, setCommissionPerContract] = useState("0.65");
   const [spreadPct, setSpreadPct] = useState("3");
   const [cashInterestEnabled, setCashInterestEnabled] = useState(false);
@@ -32,6 +35,9 @@ export default function InputForm({ onSubmit, loading }: InputFormProps) {
       initialCapital: parseNum(initialCapital, 100000),
       period,
       riskFreeRate: parseNum(riskFreeRate, 4.5) / 100,
+      delta: parseNum(delta, 50) / 100,
+      ivPremium: parseNum(ivPremium, 20) / 100,
+      volWindow: parseNum(volWindow, 30),
       commissionPerContract: parseNum(commissionPerContract, 0.65),
       spreadPct: parseNum(spreadPct, 3) / 100,
       cashInterestEnabled,
@@ -114,6 +120,69 @@ export default function InputForm({ onSubmit, loading }: InputFormProps) {
               step={0.1}
               min={0}
               max={20}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="min-w-0">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Delta
+              <span className="relative inline-block ml-1 group">
+                <span className="cursor-help text-gray-400 hover:text-gray-600">&#9432;</span>
+                <span className="invisible group-hover:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-56 bg-gray-800 text-white text-xs rounded px-3 py-2 z-10 leading-relaxed">
+                  Put 期权的目标 Delta（绝对值）。50 = ATM（平值），30 = OTM（虚值，strike 低于现价）。Delta 越小，权利金越低但被行权概率也越低。
+                </span>
+              </span>
+            </label>
+            <input
+              type="number"
+              value={delta}
+              onChange={(e) => setDelta(e.target.value)}
+              onBlur={() => setDelta(String(parseNum(delta, 50)))}
+              step={5}
+              min={5}
+              max={95}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="min-w-0">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              IV Premium (%)
+              <span className="relative inline-block ml-1 group">
+                <span className="cursor-help text-gray-400 hover:text-gray-600">&#9432;</span>
+                <span className="invisible group-hover:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-56 bg-gray-800 text-white text-xs rounded px-3 py-2 z-10 leading-relaxed">
+                  隐含波动率（IV）相对历史波动率（HV）的溢价。Put 端通常有波动率风险溢价，IV &gt; HV。20% 表示 IV = HV &times; 1.2。设为 0 则用纯历史波动率定价。
+                </span>
+              </span>
+            </label>
+            <input
+              type="number"
+              value={ivPremium}
+              onChange={(e) => setIvPremium(e.target.value)}
+              onBlur={() => setIvPremium(String(parseNum(ivPremium, 20)))}
+              step={5}
+              min={0}
+              max={100}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="min-w-0">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Vol Window (days)
+              <span className="relative inline-block ml-1 group">
+                <span className="cursor-help text-gray-400 hover:text-gray-600">&#9432;</span>
+                <span className="invisible group-hover:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-56 bg-gray-800 text-white text-xs rounded px-3 py-2 z-10 leading-relaxed">
+                  计算历史波动率使用的交易日数量。20 &asymp; 1个月，30 &asymp; 6周，60 &asymp; 3个月。窗口越长波动率越平滑，短窗口对近期行情更敏感。
+                </span>
+              </span>
+            </label>
+            <input
+              type="number"
+              value={volWindow}
+              onChange={(e) => setVolWindow(e.target.value)}
+              onBlur={() => setVolWindow(String(parseNum(volWindow, 30)))}
+              step={5}
+              min={10}
+              max={120}
               className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
             />
           </div>
