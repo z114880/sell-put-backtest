@@ -15,7 +15,7 @@ export default function InputForm({ onSubmit, loading }: InputFormProps) {
   const [riskFreeRate, setRiskFreeRate] = useState("4.5");
   const [commissionPerContract, setCommissionPerContract] = useState("0.65");
   const [spreadPct, setSpreadPct] = useState("3");
-  const [cashInterestEnabled, setCashInterestEnabled] = useState(true);
+  const [cashInterestEnabled, setCashInterestEnabled] = useState(false);
   const [cashInterestRate, setCashInterestRate] = useState("4.4");
 
   const parseNum = (v: string, fallback: number) => {
