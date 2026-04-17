@@ -1,4 +1,4 @@
-export type Period = "weekly" | "biweekly" | "monthly" | "quarterly";
+export type Period = "weekly" | "biweekly" | "monthly" | "bimonthly" | "quarterly";
 
 export interface BacktestRequest {
   ticker: string;

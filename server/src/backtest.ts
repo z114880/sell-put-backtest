@@ -164,6 +164,7 @@ function runBuyAndHold(
 // - weekly:    every Thursday
 // - biweekly:  every other Thursday (starting from the first one)
 // - monthly:   last Thursday of each month
+// - bimonthly: last Thursday of every other month, anchored to the start month
 // - quarterly: last Thursday of the last month of each quarter (Mar, Jun, Sep, Dec)
 // ---------------------------------------------------------------------------
 function getRollThursdays(startDate: string, endDate: string, period: Period): string[] {
@@ -171,16 +172,23 @@ function getRollThursdays(startDate: string, endDate: string, period: Period): s
   const end = new Date(endDate + "T00:00:00");
   const thursdays: string[] = [];
 
-  if (period === "monthly" || period === "quarterly") {
+  if (period === "monthly" || period === "bimonthly" || period === "quarterly") {
     // Collect last Thursday of relevant months
     const quarterMonths = new Set([2, 5, 8, 11]); // Mar, Jun, Sep, Dec (0-indexed)
+    const startMonthIndex = start.getFullYear() * 12 + start.getMonth();
     const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
 
     while (cursor <= end) {
       const year = cursor.getFullYear();
       const month = cursor.getMonth();
+      const monthIndex = year * 12 + month;
 
       if (period === "quarterly" && !quarterMonths.has(month)) {
+        cursor.setMonth(cursor.getMonth() + 1);
+        continue;
+      }
+
+      if (period === "bimonthly" && (monthIndex - startMonthIndex) % 2 !== 0) {
         cursor.setMonth(cursor.getMonth() + 1);
         continue;
       }

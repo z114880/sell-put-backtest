@@ -23,7 +23,7 @@ server.post<{ Body: BacktestRequest }>("/api/backtest", async (request, reply) =
     return reply.status(400).send({ error: "End date must be after start date" });
   }
 
-  const validPeriods = ["weekly", "biweekly", "monthly", "quarterly"];
+  const validPeriods = ["weekly", "biweekly", "monthly", "bimonthly", "quarterly"];
   if (!validPeriods.includes(period)) {
     return reply.status(400).send({ error: `Invalid period. Must be one of: ${validPeriods.join(", ")}` });
   }

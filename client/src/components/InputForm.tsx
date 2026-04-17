@@ -99,6 +99,7 @@ export default function InputForm({ onSubmit, loading }: InputFormProps) {
               <option value="weekly">Weekly (7d)</option>
               <option value="biweekly">Biweekly (14d)</option>
               <option value="monthly">Monthly (30d)</option>
+              <option value="bimonthly">Bimonthly (60d)</option>
               <option value="quarterly">Quarterly (90d)</option>
             </select>
           </div>
